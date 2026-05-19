@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scratch Card</title>
+
+  <link rel="preload" as="image" href="./images/back.jpeg" />
+  <link rel="preload" as="image" href="./images/front.jpeg" />
+
+  <style>
+    html { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: inherit; }
+
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+      overflow: hidden;
+    }
+
+    .sc__wrapper {
+      height: 100vh;
+      max-width: calc(100vh * (1080 / 1920));
+      aspect-ratio: 1080 / 1920;
+      border: 5px solid white;
+      position: relative;
+    }
+
+    .sc__container {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .sc__container img,
+    .sc__container canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    #backImage {
+      visibility: hidden;
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+</head>
+
+<body>
+  <div class="sc__wrapper">
+    <div id="js--sc--container" class="sc__container">
+      <img
+        id="backImage"
+        src="./images/back.jpeg"
+        alt="Background"
+      />
+      <canvas id="scratchCanvas"></canvas>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+
+      const canvas = document.getElementById("scratchCanvas");
+      const container = document.getElementById("js--sc--container");
+      const backImage = document.getElementById("backImage");
+      const ctx = canvas.getContext("2d");
+
+      const dpr = window.devicePixelRatio || 1;
+
+      canvas.width = container.clientWidth * dpr;
+      canvas.height = container.clientHeight * dpr;
+
+      let scratching = false;
+      let fired = false;
+      let lx = null;
+      let ly = null;
+
+      /*
+        WINNING PINK TIARAS
+        1. Top right
+        2. Centre
+        3. Bottom left
+      */
+      const winningZones = [
+        {
+          name: "top-right-pink-tiara",
+          x: 0.665,
+          y: 0.330,
+          w: 0.235,
+          h: 0.120,
+          cells: new Set(),
+          done: false
+        },
+        {
+          name: "center-pink-tiara",
+          x: 0.380,
+          y: 0.470,
+          w: 0.240,
+          h: 0.125,
+          cells: new Set(),
+          done: false
+        },
+        {
+          name: "bottom-left-pink-tiara",
+          x: 0.100,
+          y: 0.620,
+          w: 0.240,
+          h: 0.130,
+          cells: new Set(),
+          done: false
+        }
+      ];
+
+      const CELLS_NEEDED_PER_PINK_TIARA = 10;
+
+      /* SOUND */
+      const winSound = new Audio("./sounds/win.mp3");
+      winSound.preload = "auto";
+      winSound.volume = 0.7;
+
+      let primed = false;
+
+      function primeAudio() {
+        if (primed) return;
+
+        primed = true;
+
+        winSound.muted = true;
+
+        winSound.play()
+          .then(() => {
+            winSound.pause();
+            winSound.currentTime = 0;
+            winSound.muted = false;
+          })
+          .catch(() => {});
+      }
+
+      /* LOAD FRONT IMAGE FIRST */
+      const front = new Image();
+      front.src = "./images/front.jpeg";
+
+      front.onload = () => {
+
+        ctx.drawImage(
+          front,
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+
+        /* SHOW BACK ONLY AFTER FRONT READY */
+        backImage.style.visibility = "visible";
+
+        ctx.globalCompositeOperation =
+          "destination-out";
+
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        canvas.addEventListener(
+          "mousedown",
+          start
+        );
+
+        canvas.addEventListener(
+          "touchstart",
+          start,
+          { passive: false }
+        );
+
+        canvas.addEventListener(
+          "mouseup",
+          end
+        );
+
+        canvas.addEventListener(
+          "mouseleave",
+          end
+        );
+
+        canvas.addEventListener(
+          "touchend",
+          end
+        );
+
+        canvas.addEventListener(
+          "touchcancel",
+          end
+        );
+      };
+
+      function start(e) {
+        primeAudio();
+
+        e.preventDefault();
+
+        scratching = true;
+
+        const pos = getPos(e);
+
+        lx = pos.x;
+        ly = pos.y;
+
+        drawDot(lx, ly);
+        trackWinningScratch(lx, ly);
+
+        canvas.addEventListener(
+          "mousemove",
+          scratch
+        );
+
+        canvas.addEventListener(
+          "touchmove",
+          scratch,
+          { passive: false }
+        );
+      }
+
+      function end() {
+        scratching = false;
+
+        lx = null;
+        ly = null;
+
+        canvas.removeEventListener(
+          "mousemove",
+          scratch
+        );
+
+        canvas.removeEventListener(
+          "touchmove",
+          scratch
+        );
+
+        checkWin();
+      }
+
+      function getPos(e) {
+        const r =
+          canvas.getBoundingClientRect();
+
+        const p =
+          e.touches
+            ? e.touches[0]
+            : e;
+
+        return {
+          x: (p.clientX - r.left) * dpr,
+          y: (p.clientY - r.top) * dpr
+        };
+      }
+
+      function scratch(e) {
+        if (!scratching) return;
+
+        e.preventDefault();
+
+        const pos = getPos(e);
+
+        const x = pos.x;
+        const y = pos.y;
+
+        const brush = 34 * dpr;
+
+        ctx.lineWidth = brush;
+
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+
+        trackLine(lx, ly, x, y);
+
+        lx = x;
+        ly = y;
+
+        checkWin();
+      }
+
+      function drawDot(x, y) {
+        const brush = 17 * dpr;
+
+        ctx.beginPath();
+        ctx.arc(
+          x,
+          y,
+          brush,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fill();
+      }
+
+      function trackLine(
+        x1,
+        y1,
+        x2,
+        y2
+      ) {
+        const dist = Math.hypot(
+          x2 - x1,
+          y2 - y1
+        );
+
+        const steps = Math.max(
+          1,
+          Math.ceil(
+            dist / (8 * dpr)
+          )
+        );
+
+        for (
+          let i = 0;
+          i <= steps;
+          i++
+        ) {
+          const x =
+            x1 +
+            ((x2 - x1) * i) /
+              steps;
+
+          const y =
+            y1 +
+            ((y2 - y1) * i) /
+              steps;
+
+          trackWinningScratch(
+            x,
+            y
+          );
+        }
+      }
+
+      function trackWinningScratch(
+        px,
+        py
+      ) {
+        const nx =
+          px / canvas.width;
+
+        const ny =
+          py / canvas.height;
+
+        winningZones.forEach(
+          zone => {
+
+            if (zone.done)
+              return;
+
+            const inside =
+              nx >= zone.x &&
+              nx <=
+                zone.x +
+                  zone.w &&
+              ny >= zone.y &&
+              ny <=
+                zone.y +
+                  zone.h;
+
+            if (!inside)
+              return;
+
+            const localX =
+              (nx - zone.x) /
+              zone.w;
+
+            const localY =
+              (ny - zone.y) /
+              zone.h;
+
+            const gridX =
+              Math.floor(
+                localX * 5
+              );
+
+            const gridY =
+              Math.floor(
+                localY * 5
+              );
+
+            zone.cells.add(
+              `${gridX}-${gridY}`
+            );
+
+            if (
+              zone.cells.size >=
+              CELLS_NEEDED_PER_PINK_TIARA
+            ) {
+              zone.done = true;
+            }
+          }
+        );
+      }
+
+      function checkWin() {
+        if (fired) return;
+
+        const won =
+          winningZones.every(
+            zone => zone.done
+          );
+
+        if (won) {
+          fired = true;
+          triggerWin();
+        }
+      }
+
+      function triggerWin() {
+
+        setTimeout(() => {
+
+    const confettiColors = [
+  "#8FBCE6", // soft cornflower blue
+  "#7DAEE3", // dusty medium blue
+  "#6F9FD8", // slightly deeper powder blue
+  "#A7C7E7", // soft pastel blue
+  "#D6E8F7", // pale airy blue
+  "#FFFFFF"  // sparkle contrast
+];
+          function confettiBurst(
+            originY = 0.62,
+            particleCount = 110,
+            velocity = 60
+          ) {
+            confetti({
+              particleCount,
+              spread: 60,
+              startVelocity:
+                velocity,
+              gravity: 1.1,
+              ticks: 180,
+              scalar: 0.95,
+              drift:
+                (Math.random() -
+                  0.5) *
+                0.8,
+              origin: {
+                x: 0.5,
+                y: originY
+              },
+              colors:
+                confettiColors,
+              shapes: [
+                "circle",
+                "square"
+              ]
+            });
+          }
+
+          confettiBurst(
+            0.62,
+            140,
+            65
+          );
+
+          setTimeout(
+            () =>
+              confettiBurst(
+                0.60,
+                90,
+                55
+              ),
+            220
+          );
+
+          setTimeout(
+            () =>
+              confettiBurst(
+                0.64,
+                70,
+                45
+              ),
+            520
+          );
+
+          winSound.currentTime = 0;
+
+          winSound
+            .play()
+            .catch(() => {});
+
+        }, 1000);
+      }
+
+    });
+  </script>
+</body>
+</html>
